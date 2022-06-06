@@ -2,11 +2,12 @@ package client
 
 import (
 	"encoding/json"
-	"fmt"
 	"go-p2p/storage"
 	"log"
 	"net"
 	"strings"
+
+	"github.com/c-bata/go-prompt"
 )
 
 var lrconn *net.UDPConn
@@ -95,7 +96,7 @@ func UserCommand(conn *net.UDPConn) {
 		var msg string
 		var err error
 		for {
-			fmt.Scanln(&msg)
+			msg = CliPrompt(">>>", suggest)
 			index := strings.Index(msg, ">")
 			if index == -1 {
 				log.Println("指令格式错误")
@@ -182,4 +183,21 @@ func RecvMsg() {
 			log.Printf("未知的消息类型:%d, 来自[%s]\n", usermsg.MsgType, caddr.String())
 		}
 	}
+}
+
+func CliPrompt(prefix string, sugs []prompt.Suggest) string {
+	completer := func(d prompt.Document) []prompt.Suggest {
+		return prompt.FilterHasPrefix(sugs, d.GetWordBeforeCursor(), true)
+	}
+	t := prompt.Input(prefix, completer)
+	return t
+}
+
+var suggest = []prompt.Suggest{
+	{Text: "all>", Description: "查找所有用户"},
+	{Text: "connectto>", Description: "连接到某个用户"},
+	{Text: "msg>", Description: "发送消息"},
+	{Text: "allow>", Description: "允许连接"},
+	{Text: "deny>", Description: "拒绝连接"},
+	{Text: "send>", Description: "发送消息"},
 }
