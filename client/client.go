@@ -165,10 +165,15 @@ func Connect(laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 func RecvMsg() {
 	bs := make([]byte, 1024)
 	var usermsg storage.UserMsg
+	failCount := 0
 	for {
 		n, caddr, err := lrconn.ReadFromUDP(bs)
 		if err != nil {
-			log.Printf("接收消息失败:%s\n", err)
+			if failCount > 3 {
+				log.Printf("接收消息失败:%s\n", err)
+				return
+			}
+			failCount++
 			continue
 		}
 		err = json.Unmarshal(bs[:n], &usermsg)
