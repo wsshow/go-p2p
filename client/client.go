@@ -145,10 +145,8 @@ func UserCommand(conn *net.UDPConn) {
 				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.Rename, Msg: msg[index+1:]})
 			case "changetotcp":
 				err = SendUDPMsg(lrconn, storage.UserMsg{MsgType: storage.ChangeToTCP})
-				time.Sleep(3 * time.Second)
-				fmt.Println("等待消息发送完毕")
+				laddr = lrconn.LocalAddr().(*net.UDPAddr)
 				lrconn.Close()
-				fmt.Println("已关闭lrconn连接")
 				time.Sleep(3 * time.Second)
 				tcpconn, _ = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
 				go RecvMsgWithTCP()
