@@ -2,12 +2,14 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"go-p2p/storage"
 	"log"
 	"net"
 	"strings"
 
-	"github.com/c-bata/go-prompt"
+	"github.com/AlecAivazis/survey/v2"
+	"github.com/AlecAivazis/survey/v2/terminal"
 )
 
 var lrconn *net.UDPConn
@@ -48,7 +50,7 @@ func Run(port int, serverAddr string) {
 	for {
 		n, caddr, err := conn.ReadFromUDP(b)
 		if err != nil {
-			log.Printf("接收数据失败:%s\n", err)
+			log.Printf("[%s]:退出\n", conn.LocalAddr().String())
 			return
 		}
 		err = json.Unmarshal(b[:n], &usermsg)
@@ -59,7 +61,6 @@ func Run(port int, serverAddr string) {
 		// 根据消息类型进行处理
 		switch usermsg.MsgType {
 		case storage.Heartbeat:
-			// log.Printf("收到[%s]心跳消息:%s", raddr.String(), string(b[:n]))
 			conn.Write(b[:n])
 		case storage.ConnectTo:
 			log.Printf("收到[%s]连接消息，是否同意(allow>addr/deny>addr):\n", usermsg.Msg)
@@ -96,7 +97,12 @@ func UserCommand(conn *net.UDPConn) {
 		var msg string
 		var err error
 		for {
-			msg = CliPrompt(">>>", suggest)
+			err = survey.AskOne(prompt, &msg, icon)
+			if err != nil {
+				if err == terminal.InterruptErr {
+					msg = "exit>"
+				}
+			}
 			index := strings.Index(msg, ">")
 			if index == -1 {
 				log.Println("指令格式错误")
@@ -125,6 +131,14 @@ func UserCommand(conn *net.UDPConn) {
 				err = SendMsg(lrconn, storage.UserMsg{MsgType: storage.Msg, Msg: msg[index+1:]})
 			case "rename":
 				err = SendMsg(conn, storage.UserMsg{MsgType: storage.Rename, Msg: msg[index+1:]})
+			case "exit":
+				if conn != nil {
+					conn.Close()
+				}
+				if lrconn != nil {
+					lrconn.Close()
+				}
+				return
 			default:
 				log.Println("未知的指令")
 				continue
@@ -170,7 +184,7 @@ func RecvMsg() {
 		n, caddr, err := lrconn.ReadFromUDP(bs)
 		if err != nil {
 			if failCount > 3 {
-				log.Printf("接收消息失败:%s\n", err)
+				log.Printf("[%s]:退出\n", lrconn.LocalAddr().String())
 				return
 			}
 			failCount++
@@ -190,19 +204,43 @@ func RecvMsg() {
 	}
 }
 
-func CliPrompt(prefix string, sugs []prompt.Suggest) string {
-	completer := func(d prompt.Document) []prompt.Suggest {
-		return prompt.FilterHasPrefix(sugs, d.GetWordBeforeCursor(), true)
-	}
-	t := prompt.Input(prefix, completer)
-	return t
+type Suggest struct {
+	Text string
+	Desc string
 }
 
-var suggest = []prompt.Suggest{
-	{Text: "all", Description: "查找所有可连接用户"},
-	{Text: "connectto", Description: "连接指定用户"},
-	{Text: "allow", Description: "允许连接"},
-	{Text: "deny", Description: "拒绝连接"},
-	{Text: "msg", Description: "发送消息"},
-	{Text: "rename", Description: "更改昵称"},
+var suggests = []Suggest{
+	{Text: "all", Desc: "查找所有可连接用户"},
+	{Text: "connectto", Desc: "连接指定用户"},
+	{Text: "allow", Desc: "允许连接"},
+	{Text: "deny", Desc: "拒绝连接"},
+	{Text: "msg", Desc: "发送消息"},
+	{Text: "rename", Desc: "更改昵称"},
+	{Text: "exit", Desc: "退出"},
 }
+
+var prompt = &survey.Input{
+	Suggest: func(toComplete string) []string {
+		var sugs []string
+		for _, sug := range suggests {
+			if strings.HasPrefix(sug.Text, toComplete) {
+				sugs = append(sugs, sug.Text)
+			}
+		}
+		return sugs
+	},
+	Help: func() string {
+		s := "\n"
+		for _, sug := range suggests {
+			s += fmt.Sprintf("%-10s\t%-10s\n", sug.Text, sug.Desc)
+		}
+		return s
+	}(),
+}
+
+var icon = survey.WithIcons(func(icons *survey.IconSet) {
+	// set icons
+	icons.Question.Text = "💬"
+	// for more information on formatting the icons, see here: https://github.com/mgutz/ansi#style-format
+	icons.Question.Format = "yellow+hb"
+})
