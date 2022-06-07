@@ -19,6 +19,8 @@ const (
 	SearchAll
 	// 客户端重命名
 	Rename
+	// 转为tcp连接
+	ChangeToTCP
 	// 普通消息
 	Msg
 )

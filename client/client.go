@@ -4,19 +4,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-p2p/storage"
+	"io"
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/AlecAivazis/survey/v2/terminal"
 )
 
 var lrconn *net.UDPConn
+var tcpconn *net.TCPConn
+var raddr, laddr *net.UDPAddr
 
 func Run(port int, serverAddr string) {
-	raddr := &net.UDPAddr{IP: net.IPv4zero, Port: port}
-	laddr := &net.UDPAddr{IP: net.IPv4zero, Port: port}
+
+	laddr = &net.UDPAddr{IP: net.IPv4zero, Port: port}
 	saddr, _ := net.ResolveUDPAddr("udp4", serverAddr)
 
 	log.Printf("本机地址[%s]\n", laddr)
@@ -64,6 +68,11 @@ func Run(port int, serverAddr string) {
 			conn.Write(b[:n])
 		case storage.ConnectTo:
 			log.Printf("收到[%s]连接消息，是否同意(allow>addr/deny>addr):\n", usermsg.Msg)
+			raddr, err = net.ResolveUDPAddr("udp4", usermsg.Msg)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
 		case storage.ConnectAllow:
 			ss := strings.Split(usermsg.Msg, ",")
 			if len(ss) != 2 {
@@ -75,16 +84,16 @@ func Run(port int, serverAddr string) {
 			laddr, _ = net.ResolveUDPAddr("udp4", ss[1])
 			raddr.Port = raddr.Port + 100
 			laddr.Port = laddr.Port + 100
-			lrconn, err = Connect(laddr, raddr)
+			lrconn, err = ConnectWithUDP(laddr, raddr)
 			if err != nil {
 				log.Printf("连接[%s]失败:%s\n", raddr.String(), err)
 				return
 			}
-			go RecvMsg()
+			go RecvMsgWithUDP()
 		case storage.ConnectDeny:
 			log.Printf("[%s]拒绝连接\n", usermsg.Msg)
 		case storage.Msg:
-			log.Printf("收到[%s]消息:%s\n", caddr.String(), usermsg.Msg)
+			fmt.Printf("[%s]:%s\n", caddr.String(), usermsg.Msg)
 		default:
 			log.Printf("未知的消息类型:%d, 来自[%s]\n", usermsg.MsgType, caddr.String())
 		}
@@ -110,27 +119,39 @@ func UserCommand(conn *net.UDPConn) {
 			}
 			switch msg[:index] {
 			case "all":
-				err = SendMsg(conn, storage.UserMsg{MsgType: storage.SearchAll})
+				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.SearchAll})
 			case "connectto":
-				err = SendMsg(conn, storage.UserMsg{MsgType: storage.ConnectTo, Msg: msg[index+1:]})
+				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.ConnectTo, Msg: msg[index+1:]})
 			case "allow":
-				_ = SendMsg(conn, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: msg[index+1:]})
-				raddr, _ := net.ResolveUDPAddr("udp4", msg[index+1:])
-				laddr := conn.LocalAddr().(*net.UDPAddr)
+				_ = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: msg[index+1:]})
 				raddr.Port = raddr.Port + 100
 				laddr.Port = laddr.Port + 100
-				lrconn, err = Connect(laddr, raddr)
+				lrconn, err = ConnectWithUDP(laddr, raddr)
 				if err != nil {
 					log.Printf("连接[%s]失败:%s\n", raddr.String(), err)
 					return
 				}
-				go RecvMsg()
+				go RecvMsgWithUDP()
 			case "deny":
-				err = SendMsg(conn, storage.UserMsg{MsgType: storage.ConnectDeny, Msg: msg[index+1:]})
+				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.ConnectDeny, Msg: msg[index+1:]})
 			case "msg":
-				err = SendMsg(lrconn, storage.UserMsg{MsgType: storage.Msg, Msg: msg[index+1:]})
+				if lrconn != nil {
+					err = SendUDPMsg(lrconn, storage.UserMsg{MsgType: storage.Msg, Msg: msg[index+1:]})
+				}
+				if tcpconn != nil {
+					err = SendTCPMsg(tcpconn, storage.UserMsg{MsgType: storage.Msg, Msg: msg[index+1:]})
+				}
 			case "rename":
-				err = SendMsg(conn, storage.UserMsg{MsgType: storage.Rename, Msg: msg[index+1:]})
+				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.Rename, Msg: msg[index+1:]})
+			case "changetotcp":
+				err = SendUDPMsg(lrconn, storage.UserMsg{MsgType: storage.ChangeToTCP})
+				time.Sleep(3 * time.Second)
+				fmt.Println("等待消息发送完毕")
+				lrconn.Close()
+				fmt.Println("已关闭lrconn连接")
+				time.Sleep(3 * time.Second)
+				tcpconn, _ = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
+				go RecvMsgWithTCP()
 			case "exit":
 				if conn != nil {
 					conn.Close()
@@ -151,7 +172,7 @@ func UserCommand(conn *net.UDPConn) {
 	}()
 }
 
-func SendMsg(conn *net.UDPConn, msg storage.UserMsg) error {
+func SendUDPMsg(conn *net.UDPConn, msg storage.UserMsg) error {
 	bs, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -163,12 +184,12 @@ func SendMsg(conn *net.UDPConn, msg storage.UserMsg) error {
 	return nil
 }
 
-func Connect(laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
+func ConnectWithUDP(laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 	rlconn, err := net.DialUDP("udp4", laddr, raddr)
 	if err != nil {
 		return nil, err
 	}
-	bs, _ := json.Marshal(storage.UserMsg{MsgType: storage.Msg, Msg: "Connect"})
+	bs, _ := json.Marshal(storage.UserMsg{MsgType: storage.Msg})
 	_, err = rlconn.Write(bs)
 	if err != nil {
 		return nil, err
@@ -176,7 +197,7 @@ func Connect(laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 	return rlconn, nil
 }
 
-func RecvMsg() {
+func RecvMsgWithUDP() {
 	bs := make([]byte, 1024)
 	var usermsg storage.UserMsg
 	failCount := 0
@@ -197,9 +218,62 @@ func RecvMsg() {
 		}
 		switch usermsg.MsgType {
 		case storage.Msg:
-			log.Printf("收到[%s]消息:%s\n", caddr.String(), usermsg.Msg)
+			fmt.Printf("[%s]:%s\n", caddr.String(), usermsg.Msg)
+		case storage.ChangeToTCP:
+			lrconn.Close()
+			time.Sleep(time.Second)
+			tcpconn, _ = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
+			go RecvMsgWithTCP()
 		default:
 			log.Printf("未知的消息类型:%d, 来自[%s]\n", usermsg.MsgType, caddr.String())
+		}
+	}
+}
+
+func SendTCPMsg(conn *net.TCPConn, msg storage.UserMsg) error {
+	bs, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Write(bs)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func ConnectWithTCP(laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
+	tcpConn, err := net.DialTCP("tcp4", laddr, raddr)
+	if err != nil {
+		log.Printf("与客户端[%s]建立TCP失败:%s\n", raddr, err)
+		return nil, err
+	}
+	return tcpConn, nil
+}
+
+func RecvMsgWithTCP() {
+	bs := make([]byte, 1024)
+	var usermsg storage.UserMsg
+	for {
+		n, err := tcpconn.Read(bs)
+		if n == 0 {
+			log.Printf("[%s]退出\n", raddr.String())
+			return
+		}
+		if err != nil && err != io.EOF {
+			log.Printf("接收信息失败：%s\n", err)
+			return
+		}
+		err = json.Unmarshal(bs[:n], &usermsg)
+		if err != nil {
+			log.Printf("反序列化失败:%s\n", err)
+			continue
+		}
+		switch usermsg.MsgType {
+		case storage.Msg:
+			fmt.Printf("[%s]:%s\n", raddr.String(), usermsg.Msg)
+		default:
+			log.Printf("未知的消息类型:%d, 来自[%s]\n", usermsg.MsgType, raddr.String())
 		}
 	}
 }
@@ -216,6 +290,8 @@ var suggests = []Suggest{
 	{Text: "deny", Desc: "拒绝连接"},
 	{Text: "msg", Desc: "发送消息"},
 	{Text: "rename", Desc: "更改昵称"},
+	{Text: "changetotcp", Desc: "切换到TCP"},
+	{Text: "file", Desc: "文件传输"},
 	{Text: "exit", Desc: "退出"},
 }
 
