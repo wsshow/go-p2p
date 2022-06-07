@@ -85,12 +85,18 @@ func Run(port int) {
 			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "connect to failed, user not exist"})
 		case storage.ConnectAllow:
 			log.Printf("[%s] allowed to connect from [%s]", addr.String(), usermsg.Msg)
-			raddr, _ := net.ResolveUDPAddr("udp4", usermsg.Msg)
-			SendMsg(conn, raddr, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: addr.String() + "," + raddr.String()})
+			if raddr, ok := mapAddr[usermsg.Msg]; ok {
+				SendMsg(conn, raddr, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: addr.String() + "," + raddr.String()})
+			} else {
+				SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "user not exist, check param and try again"})
+			}
 		case storage.ConnectDeny:
 			log.Printf("[%s] refused to connect from [%s]", addr.String(), usermsg.Msg)
-			raddr, _ := net.ResolveUDPAddr("udp4", usermsg.Msg)
-			SendMsg(conn, raddr, storage.UserMsg{MsgType: storage.Msg, Msg: addr.String()})
+			if raddr, ok := mapAddr[usermsg.Msg]; ok {
+				SendMsg(conn, raddr, storage.UserMsg{MsgType: storage.Msg, Msg: addr.String()})
+			} else {
+				SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "user not exist, check param and try again"})
+			}
 		case storage.Search:
 			log.Printf("[%s] to search: %s", addr.String(), usermsg.Msg)
 			_, ok := mapAddr[usermsg.Msg]
@@ -133,20 +139,20 @@ func SendMsg(conn *net.UDPConn, addr *net.UDPAddr, msg storage.UserMsg) error {
 
 func CheckHeartbeat(conn *net.UDPConn) {
 	for {
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		for k, v := range mapAddr {
 			if err := SendHeartbeat(conn, v); err != nil {
-				log.Printf("sendHeartbeat:%s, [%s] failed to check heartbeat, disconnect\n", err.Error(), v.String())
+				log.Printf("[%s] disconnect\n", v.String())
 				delete(mapAddr, k)
 				continue
 			}
 			select {
 			case <-time.After(3 * time.Second):
-				log.Printf("[%s] failed to check heartbeat, disconnect\n", v.String())
+				log.Printf("[%s] disconnect\n", v.String())
 				delete(mapAddr, k)
 			case msg := <-heartbeatChan:
 				if msg.Msg != v.String() {
-					log.Printf("received [%s] not match with [%s], failed to check heartbeat, disconnect\n", msg.Msg, v.String())
+					log.Printf("[%s] disconnect\n", v.String())
 					delete(mapAddr, k)
 					continue
 				}

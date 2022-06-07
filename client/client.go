@@ -97,7 +97,7 @@ func UserCommand(conn *net.UDPConn) {
 		var msg string
 		var err error
 		for {
-			err = survey.AskOne(prompt, &msg, icon)
+			err = survey.AskOne(promptCmd, &msg, icon)
 			if err != nil {
 				if err == terminal.InterruptErr {
 					msg = "exit>"
@@ -219,7 +219,7 @@ var suggests = []Suggest{
 	{Text: "exit", Desc: "退出"},
 }
 
-var prompt = &survey.Input{
+var promptCmd = &survey.Input{
 	Suggest: func(toComplete string) []string {
 		var sugs []string
 		for _, sug := range suggests {
