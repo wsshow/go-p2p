@@ -2,12 +2,14 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"go-p2p/storage"
+	"go-p2p/utils"
 	"log"
 	"net"
 	"strconv"
 	"time"
+
+	"github.com/liushuochen/gotable"
 )
 
 var mapAddr = make(map[string]*net.UDPAddr)
@@ -54,14 +56,33 @@ func Run(port int) {
 			heartbeatChan <- usermsg
 		case storage.Connect:
 			log.Printf("收到[%s]连接消息", addr.String())
-			mapAddr[addr.String()] = addr
+			mapAddr[utils.RandStr(5)] = addr
+		case storage.Rename:
+			log.Printf("收到[%s]改名消息", addr.String())
+			if a, ok := mapAddr[usermsg.Msg]; ok {
+				if a.String() == addr.String() {
+					SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "rename success"})
+				} else {
+					SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "rename failed, name already exists"})
+				}
+				continue
+			} else {
+				for k, v := range mapAddr {
+					if v.String() == addr.String() {
+						mapAddr[usermsg.Msg] = v
+						delete(mapAddr, k)
+						SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "rename success"})
+						break
+					}
+				}
+			}
 		case storage.ConnectTo:
 			log.Printf("客户端[%s]想要连接[%s]", addr.String(), usermsg.Msg)
 			if a, ok := mapAddr[usermsg.Msg]; ok {
 				SendMsg(conn, a, storage.UserMsg{MsgType: storage.ConnectTo, Msg: addr.String()})
 				continue
 			}
-			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "连接失败，该用户不存在"})
+			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "connect to failed, user not exist"})
 		case storage.ConnectAllow:
 			log.Printf("客户端[%s]同意连接[%s]", addr.String(), usermsg.Msg)
 			raddr, _ := net.ResolveUDPAddr("udp4", usermsg.Msg)
@@ -75,15 +96,20 @@ func Run(port int) {
 			_, ok := mapAddr[usermsg.Msg]
 			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: strconv.FormatBool(ok)})
 		case storage.SearchAll:
-			var s string
-			s = "\n当前所有可连接的客户端:\n"
-			for _, v := range mapAddr {
+			table, err := gotable.Create("序号", "名称", "地址")
+			if err != nil {
+				log.Println("Create table failed: ", err.Error())
+				continue
+			}
+			index := 0
+			for k, v := range mapAddr {
 				if v.String() == addr.String() {
 					continue
 				}
-				s += fmt.Sprintf("地址:[%s]\n", v)
+				index++
+				table.AddRow([]string{strconv.Itoa(index), k, v.String()})
 			}
-			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: s})
+			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "\n" + table.String()})
 		case storage.Msg:
 			log.Printf("收到[%s]消息: %s", addr.String(), string(b[:n]))
 		default:

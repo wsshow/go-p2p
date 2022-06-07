@@ -17,6 +17,8 @@ const (
 	Search
 	// 查询所有客户端消息
 	SearchAll
+	// 客户端重命名
+	Rename
 	// 普通消息
 	Msg
 )

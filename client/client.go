@@ -107,8 +107,6 @@ func UserCommand(conn *net.UDPConn) {
 				err = SendMsg(conn, storage.UserMsg{MsgType: storage.SearchAll})
 			case "connectto":
 				err = SendMsg(conn, storage.UserMsg{MsgType: storage.ConnectTo, Msg: msg[index+1:]})
-			case "msg":
-				err = SendMsg(conn, storage.UserMsg{MsgType: storage.Msg, Msg: msg[index+1:]})
 			case "allow":
 				_ = SendMsg(conn, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: msg[index+1:]})
 				raddr, _ := net.ResolveUDPAddr("udp4", msg[index+1:])
@@ -123,8 +121,10 @@ func UserCommand(conn *net.UDPConn) {
 				go RecvMsg()
 			case "deny":
 				err = SendMsg(conn, storage.UserMsg{MsgType: storage.ConnectDeny, Msg: msg[index+1:]})
-			case "send":
+			case "msg":
 				err = SendMsg(lrconn, storage.UserMsg{MsgType: storage.Msg, Msg: msg[index+1:]})
+			case "rename":
+				err = SendMsg(conn, storage.UserMsg{MsgType: storage.Rename, Msg: msg[index+1:]})
 			default:
 				log.Println("未知的指令")
 				continue
@@ -199,10 +199,10 @@ func CliPrompt(prefix string, sugs []prompt.Suggest) string {
 }
 
 var suggest = []prompt.Suggest{
-	{Text: "all>", Description: "查找所有用户"},
-	{Text: "connectto>", Description: "连接到某个用户"},
-	{Text: "msg>", Description: "发送消息"},
-	{Text: "allow>", Description: "允许连接"},
-	{Text: "deny>", Description: "拒绝连接"},
-	{Text: "send>", Description: "发送消息"},
+	{Text: "all", Description: "查找所有可连接用户"},
+	{Text: "connectto", Description: "连接指定用户"},
+	{Text: "allow", Description: "允许连接"},
+	{Text: "deny", Description: "拒绝连接"},
+	{Text: "msg", Description: "发送消息"},
+	{Text: "rename", Description: "更改昵称"},
 }
