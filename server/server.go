@@ -23,13 +23,13 @@ func Run(port int) {
 		Port: port,
 	})
 	if err != nil {
-		log.Fatalf("监听失败：%s\n", err)
+		log.Fatalln(err)
 	}
 
 	// 释放资源
 	defer conn.Close()
 
-	log.Printf("开始监听：[%s]\n", conn.LocalAddr().String())
+	log.Printf("listen: [%s]\n", conn.LocalAddr().String())
 
 	// 开启心跳检测
 	go CheckHeartbeat(conn)
@@ -40,13 +40,13 @@ func Run(port int) {
 		// 等待客户端消息响应
 		n, addr, err := conn.ReadFromUDP(b)
 		if err != nil {
-			log.Printf("读取信息失败：%s\n", err)
+			log.Println(err)
 			return
 		}
 
 		// 反序列化消息
 		if err := json.Unmarshal(b[:n], &usermsg); err != nil {
-			log.Println("未知的消息格式:", err)
+			log.Println("unknown msg type:", err)
 			continue
 		}
 
@@ -55,10 +55,10 @@ func Run(port int) {
 		case storage.Heartbeat:
 			heartbeatChan <- usermsg
 		case storage.Connect:
-			log.Printf("收到[%s]连接消息", addr.String())
+			log.Printf("[%s] connect", addr.String())
 			mapAddr[utils.RandStr(5)] = addr
 		case storage.Rename:
-			log.Printf("收到[%s]改名消息", addr.String())
+			log.Printf("[%s] to rename: %s", addr.String(), usermsg.Msg)
 			if a, ok := mapAddr[usermsg.Msg]; ok {
 				if a.String() == addr.String() {
 					SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "rename success"})
@@ -77,43 +77,44 @@ func Run(port int) {
 				}
 			}
 		case storage.ConnectTo:
-			log.Printf("客户端[%s]想要连接[%s]", addr.String(), usermsg.Msg)
+			log.Printf("[%s] want to connect with [%s]", addr.String(), usermsg.Msg)
 			if a, ok := mapAddr[usermsg.Msg]; ok {
 				SendMsg(conn, a, storage.UserMsg{MsgType: storage.ConnectTo, Msg: addr.String()})
 				continue
 			}
 			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "connect to failed, user not exist"})
 		case storage.ConnectAllow:
-			log.Printf("客户端[%s]同意连接[%s]", addr.String(), usermsg.Msg)
+			log.Printf("[%s] allowed to connect from [%s]", addr.String(), usermsg.Msg)
 			raddr, _ := net.ResolveUDPAddr("udp4", usermsg.Msg)
 			SendMsg(conn, raddr, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: addr.String() + "," + raddr.String()})
 		case storage.ConnectDeny:
-			log.Printf("客户端[%s]拒绝连接[%s]", addr.String(), usermsg.Msg)
+			log.Printf("[%s] refused to connect from [%s]", addr.String(), usermsg.Msg)
 			raddr, _ := net.ResolveUDPAddr("udp4", usermsg.Msg)
 			SendMsg(conn, raddr, storage.UserMsg{MsgType: storage.Msg, Msg: addr.String()})
 		case storage.Search:
-			log.Printf("收到[%s]查询消息", addr.String())
+			log.Printf("[%s] to search: %s", addr.String(), usermsg.Msg)
 			_, ok := mapAddr[usermsg.Msg]
 			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: strconv.FormatBool(ok)})
 		case storage.SearchAll:
-			table, err := gotable.Create("序号", "名称", "地址")
+			table, err := gotable.Create("Index", "Name", "Addr")
 			if err != nil {
-				log.Println("Create table failed: ", err.Error())
+				log.Println(err.Error())
 				continue
 			}
 			index := 0
 			for k, v := range mapAddr {
+				index++
 				if v.String() == addr.String() {
+					table.AddRow([]string{"*", k, v.String()})
 					continue
 				}
-				index++
 				table.AddRow([]string{strconv.Itoa(index), k, v.String()})
 			}
 			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "\n" + table.String()})
 		case storage.Msg:
-			log.Printf("收到[%s]消息: %s", addr.String(), string(b[:n]))
+			log.Printf("[%s]:%s", addr.String(), string(b[:n]))
 		default:
-			log.Printf("未知的消息类型: %d, 来自[%s]\n", usermsg.MsgType, addr.String())
+			log.Printf("unknown msg type: %d, from [%s]\n", usermsg.MsgType, addr.String())
 		}
 	}
 }
@@ -131,26 +132,24 @@ func SendMsg(conn *net.UDPConn, addr *net.UDPAddr, msg storage.UserMsg) error {
 }
 
 func CheckHeartbeat(conn *net.UDPConn) {
-	log.Println("开始心跳检测")
 	for {
 		time.Sleep(5 * time.Second)
 		for k, v := range mapAddr {
 			if err := SendHeartbeat(conn, v); err != nil {
-				log.Printf("SendHeartbeat:%s, [%s]心跳检测失败，已断开\n", err.Error(), v.String())
+				log.Printf("sendHeartbeat:%s, [%s] failed to check heartbeat, disconnect\n", err.Error(), v.String())
 				delete(mapAddr, k)
 				continue
 			}
 			select {
 			case <-time.After(3 * time.Second):
-				log.Printf("[%s]心跳检测失败，已断开\n", v.String())
+				log.Printf("[%s] failed to check heartbeat, disconnect\n", v.String())
 				delete(mapAddr, k)
 			case msg := <-heartbeatChan:
 				if msg.Msg != v.String() {
-					log.Printf("收到信息[%s]与发送信息[%s]不匹配,心跳检测失败，已断开\n", msg.Msg, v.String())
+					log.Printf("received [%s] not match with [%s], failed to check heartbeat, disconnect\n", msg.Msg, v.String())
 					delete(mapAddr, k)
 					continue
 				}
-				// log.Printf("[%s]心跳检测成功\n", v.String())
 			}
 		}
 	}
