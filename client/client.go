@@ -117,6 +117,7 @@ func UserCommand(conn *net.UDPConn) {
 				<-signalMsg
 			case "connectto":
 				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.ConnectTo, Msg: msg[index+1:]})
+				<-signalMsg
 			case "allow":
 				_ = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.ConnectAllow, Msg: msg[index+1:]})
 				raddr.Port = raddr.Port + 100
