@@ -6,8 +6,6 @@ import (
 	"github.com/c-bata/go-prompt"
 )
 
-var signalInput = make(chan string)
-
 var suggestions = []prompt.Suggest{
 	{Text: "all", Description: "查找所有可连接用户"},
 	{Text: "connectto", Description: "连接指定用户"},
@@ -33,28 +31,12 @@ func promptExitChecker(in string, breakline bool) bool {
 	return in == "exit>" && breakline
 }
 
-func promptExecutor(in string) {
-	signalInput <- in
-}
-
-func changeLivePrefix() (string, bool) {
+func promptChangeLivePrefix() (string, bool) {
 	return livePrefix, true
-}
-
-// 该方案显示问题，暂不启用
-func PromptRun() {
-	p := prompt.New(
-		promptExecutor,
-		promptCompleter,
-		prompt.OptionTitle("go-p2p"),
-		prompt.OptionLivePrefix(changeLivePrefix),
-		prompt.OptionSetExitCheckerOnInput(promptExitChecker),
-	)
-	p.Run()
 }
 
 func ReadInput() string {
 	return prompt.Input(livePrefix, promptCompleter, prompt.OptionTitle("go-p2p"),
-		prompt.OptionLivePrefix(changeLivePrefix),
+		prompt.OptionLivePrefix(promptChangeLivePrefix),
 		prompt.OptionSetExitCheckerOnInput(promptExitChecker))
 }

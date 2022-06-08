@@ -101,13 +101,9 @@ func Run(port int, serverAddr string) {
 
 // 用户指令
 func UserCommand(conn *net.UDPConn) {
-	// 显示问题暂不启用
-	// go PromptRun()
 	go func() {
 		var msg string
 		var err error
-		// 显示问题暂不启用
-		// for msg = range signalInput {
 		for {
 			msg = ReadInput()
 			index := strings.Index(msg, ">")
