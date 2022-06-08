@@ -19,6 +19,7 @@ var suggestions = []prompt.Suggest{
 }
 
 var livePrefix = "💬 "
+var history []string
 
 func promptCompleter(d prompt.Document) []prompt.Suggest {
 	if d.LineCount() > 1 || len(strings.TrimSpace(d.CurrentLineBeforeCursor())) == 0 {
@@ -35,8 +36,15 @@ func promptChangeLivePrefix() (string, bool) {
 	return livePrefix, true
 }
 
+func addHistory(s string) {
+	history = append(history, s)
+}
+
 func ReadInput() string {
-	return prompt.Input(livePrefix, promptCompleter, prompt.OptionTitle("go-p2p"),
+	msg := prompt.Input(livePrefix, promptCompleter, prompt.OptionTitle("go-p2p"),
 		prompt.OptionLivePrefix(promptChangeLivePrefix),
+		prompt.OptionHistory(history),
 		prompt.OptionSetExitCheckerOnInput(promptExitChecker))
+	addHistory(msg)
+	return msg
 }
