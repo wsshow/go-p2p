@@ -118,7 +118,7 @@ func Run(port int) {
 			}
 			SendMsg(conn, addr, storage.UserMsg{MsgType: storage.Msg, Msg: "\n" + table.String()})
 		case storage.Msg:
-			log.Printf("[%s]:%s", addr.String(), string(b[:n]))
+			log.Printf("[%s]:%s\n", addr.String(), string(b[:n]))
 		default:
 			log.Printf("unknown msg type: %d, from [%s]\n", usermsg.MsgType, addr.String())
 		}

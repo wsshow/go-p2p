@@ -9,14 +9,12 @@ import (
 	"net"
 	"strings"
 	"time"
-
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/AlecAivazis/survey/v2/terminal"
 )
 
 var lrconn *net.UDPConn
 var tcpconn *net.TCPConn
 var raddr, laddr *net.UDPAddr
+var signalMsg = make(chan storage.UserMsg)
 
 func Run(port int, serverAddr string) {
 
@@ -94,6 +92,7 @@ func Run(port int, serverAddr string) {
 			log.Printf("[%s]拒绝连接\n", usermsg.Msg)
 		case storage.Msg:
 			fmt.Printf("[%s]:%s\n", caddr.String(), usermsg.Msg)
+			signalMsg <- usermsg
 		default:
 			log.Printf("未知的消息类型:%d, 来自[%s]\n", usermsg.MsgType, caddr.String())
 		}
@@ -102,16 +101,11 @@ func Run(port int, serverAddr string) {
 
 // 用户指令
 func UserCommand(conn *net.UDPConn) {
+	go promptRun()
 	go func() {
 		var msg string
 		var err error
-		for {
-			err = survey.AskOne(promptCmd, &msg, icon)
-			if err != nil {
-				if err == terminal.InterruptErr {
-					msg = "exit>"
-				}
-			}
+		for msg = range signalInput {
 			index := strings.Index(msg, ">")
 			if index == -1 {
 				log.Println("指令格式错误")
@@ -120,6 +114,7 @@ func UserCommand(conn *net.UDPConn) {
 			switch msg[:index] {
 			case "all":
 				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.SearchAll})
+				<-signalMsg
 			case "connectto":
 				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.ConnectTo, Msg: msg[index+1:]})
 			case "allow":
@@ -275,46 +270,3 @@ func RecvMsgWithTCP() {
 		}
 	}
 }
-
-type Suggest struct {
-	Text string
-	Desc string
-}
-
-var suggests = []Suggest{
-	{Text: "all", Desc: "查找所有可连接用户"},
-	{Text: "connectto", Desc: "连接指定用户"},
-	{Text: "allow", Desc: "允许连接"},
-	{Text: "deny", Desc: "拒绝连接"},
-	{Text: "msg", Desc: "发送消息"},
-	{Text: "rename", Desc: "更改昵称"},
-	{Text: "changetotcp", Desc: "切换到TCP"},
-	{Text: "file", Desc: "文件传输"},
-	{Text: "exit", Desc: "退出"},
-}
-
-var promptCmd = &survey.Input{
-	Suggest: func(toComplete string) []string {
-		var sugs []string
-		for _, sug := range suggests {
-			if strings.HasPrefix(sug.Text, toComplete) {
-				sugs = append(sugs, sug.Text)
-			}
-		}
-		return sugs
-	},
-	Help: func() string {
-		s := "\n"
-		for _, sug := range suggests {
-			s += fmt.Sprintf("%-10s\t%-10s\n", sug.Text, sug.Desc)
-		}
-		return s
-	}(),
-}
-
-var icon = survey.WithIcons(func(icons *survey.IconSet) {
-	// set icons
-	icons.Question.Text = "💬"
-	// for more information on formatting the icons, see here: https://github.com/mgutz/ansi#style-format
-	icons.Question.Format = "yellow+hb"
-})
