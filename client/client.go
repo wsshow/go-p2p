@@ -101,11 +101,15 @@ func Run(port int, serverAddr string) {
 
 // 用户指令
 func UserCommand(conn *net.UDPConn) {
-	go promptRun()
+	// 显示问题暂不启用
+	// go PromptRun()
 	go func() {
 		var msg string
 		var err error
-		for msg = range signalInput {
+		// 显示问题暂不启用
+		// for msg = range signalInput {
+		for {
+			msg = ReadInput()
 			index := strings.Index(msg, ">")
 			if index == -1 {
 				log.Println("指令格式错误")
@@ -139,11 +143,14 @@ func UserCommand(conn *net.UDPConn) {
 			case "rename":
 				err = SendUDPMsg(conn, storage.UserMsg{MsgType: storage.Rename, Msg: msg[index+1:]})
 			case "changetotcp":
-				err = SendUDPMsg(lrconn, storage.UserMsg{MsgType: storage.ChangeToTCP})
+				_ = SendUDPMsg(lrconn, storage.UserMsg{MsgType: storage.ChangeToTCP})
 				laddr = lrconn.LocalAddr().(*net.UDPAddr)
 				lrconn.Close()
 				time.Sleep(3 * time.Second)
-				tcpconn, _ = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
+				tcpconn, err = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
+				if err != nil {
+					return
+				}
 				go RecvMsgWithTCP()
 			case "exit":
 				if conn != nil {
@@ -177,8 +184,8 @@ func SendUDPMsg(conn *net.UDPConn, msg storage.UserMsg) error {
 	return nil
 }
 
-func ConnectWithUDP(laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
-	rlconn, err := net.DialUDP("udp4", laddr, raddr)
+func ConnectWithUDP(tladdr, traddr *net.UDPAddr) (*net.UDPConn, error) {
+	rlconn, err := net.DialUDP("udp4", tladdr, traddr)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +194,7 @@ func ConnectWithUDP(laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	livePrefix = fmt.Sprintf("[UDP %s]", laddr.String())
 	return rlconn, nil
 }
 
@@ -198,7 +206,7 @@ func RecvMsgWithUDP() {
 		n, caddr, err := lrconn.ReadFromUDP(bs)
 		if err != nil {
 			if failCount > 3 {
-				log.Printf("[%s]:退出\n", lrconn.LocalAddr().String())
+				log.Printf("[%s]:UDP连接退出\n", lrconn.LocalAddr().String())
 				return
 			}
 			failCount++
@@ -215,7 +223,10 @@ func RecvMsgWithUDP() {
 		case storage.ChangeToTCP:
 			lrconn.Close()
 			time.Sleep(time.Second)
-			tcpconn, _ = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
+			tcpconn, err = ConnectWithTCP(&net.TCPAddr{IP: laddr.IP, Port: laddr.Port}, &net.TCPAddr{IP: raddr.IP, Port: raddr.Port})
+			if err != nil {
+				return
+			}
 			go RecvMsgWithTCP()
 		default:
 			log.Printf("未知的消息类型:%d, 来自[%s]\n", usermsg.MsgType, caddr.String())
@@ -241,6 +252,7 @@ func ConnectWithTCP(laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
 		log.Printf("与客户端[%s]建立TCP失败:%s\n", raddr, err)
 		return nil, err
 	}
+	livePrefix = fmt.Sprintf("[TCP %s]", laddr.String())
 	return tcpConn, nil
 }
 
@@ -250,7 +262,7 @@ func RecvMsgWithTCP() {
 	for {
 		n, err := tcpconn.Read(bs)
 		if n == 0 {
-			log.Printf("[%s]退出\n", raddr.String())
+			log.Printf("[%s]:TCP连接退出\n", raddr.String())
 			return
 		}
 		if err != nil && err != io.EOF {
