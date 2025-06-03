@@ -16,29 +16,35 @@ The project initially uses UDP for NAT traversal. Once a P2P connection is estab
 
 ## 工作原理 (How it Works)
 
+本项目的核心组件分离了不同的职责,以实现更清晰的架构:
+(The project's core components separate responsibilities for a clearer architecture:)
+
 1.  **服务器 (Server)**:
-    *   监听UDP端口, 等待客户端连接.
-    *   管理已连接客户端的列表, 包括它们的公网UDP地址和自定义名称.
-    *   处理来自客户端的连接请求, 将一个客户端的地址信息转发给另一个客户端, 以便它们尝试直接连接.
-    *   通过心跳机制检测客户端的在线状态.
+    *   监听UDP端口, 等待客户端连接. (Listens on a UDP port for client connections.)
+    *   **`ClientRegistry`**: 此组件负责安全地管理所有客户端的信息 (如名称, UDP地址). 它处理客户端的添加,移除,查找和重命名操作,并确保并发访问的线程安全. (This component is responsible for safely managing all client information (like name, UDP address). It handles adding, removing, finding, and renaming clients, ensuring thread-safety for concurrent access.)
+    *   **`ServerMessageHandler`**: 此组件负责解析收到的UDP消息,并根据消息类型将其分派给对应的处理逻辑. (This component parses incoming UDP messages and dispatches them to the appropriate handling logic based on the message type.)
+    *   处理来自客户端的连接请求, 将一个客户端的地址信息转发给另一个客户端, 以便它们尝试直接连接. (Facilitates connection requests between clients by relaying address information.)
+    *   通过心跳机制检测客户端的在线状态. (Uses a heartbeat mechanism to detect client liveness.)
 
 2.  **客户端 (Client)**:
-    *   启动时连接到服务器, 并被分配一个初始随机名称 (可以稍后更改).
-    *   可以向服务器请求当前在线的其他客户端列表 (`all` 命令).
-    *   可以请求连接到另一个客户端 (`connect <name>` 命令).
+    *   **`Client` (Main Struct)**: 作为客户端的核心结构体,封装了与服务器的连接,用户命令处理,P2P连接管理器以及客户端的整体状态. (The main client struct, encapsulating the server connection, user command processing, P2P connection manager, and overall client state.)
+    *   启动时连接到服务器,并被分配一个初始随机名称. (Connects to the server and is assigned an initial random name.)
+    *   可以向服务器请求当前在线的其他客户端列表 (`all` 命令). (Can request a list of other online clients from the server via the `all` command.)
+    *   可以请求连接到另一个客户端 (`connect <name>` 命令). (Can request to connect to another client via the `connect <name>` command.)
+    *   **`P2PConnectionManager`**: 此组件专门负责管理P2P连接的建立,维护和状态转换 (UDP到TCP). 它封装了P2P通信的复杂性. (This component is dedicated to managing the establishment, maintenance, and state transition (UDP to TCP) of P2P connections, encapsulating P2P communication complexities.)
     *   **P2P连接流程**:
         1.  客户端S (Source) 希望连接到客户端T (Target). S向服务器发送连接请求, 指明T的名称.
-        2.  服务器将S的名称和外部UDP地址信息发送给T. (实际上服务器仅将S的名称发送给T，T通过`allow`指令响应后，服务器再将T的地址发给S，S再将自己的地址发给T，或服务器中继双方地址) - *修正: 当前实现是服务器将S的名称发送给T. T响应allow后, 服务器将T的地址和S的地址分别发给S和T的对应方.*
+        2.  服务器 (通过其 `ServerMessageHandler`) 将S的名称发送给T.
         3.  T收到连接请求后, 可以选择允许 (`allow <S_name>`) 或拒绝 (`deny <S_name>`).
         4.  如果T允许, T会通知服务器.
-        5.  服务器接着将T的外部UDP地址以及S自己的外部UDP地址(由服务器视角看到)回传给S. (服务器将T的地址发给S, S通过此信息与T联系. S的地址是服务器在S连接时记录的)
-        6.  此时, S和T都拥有对方的公网UDP地址和端口. 它们都尝试从自己的外部地址/端口向对方的外部地址/端口发送UDP包 (UDP打洞).
+        5.  服务器 (通过 `ClientRegistry` 查询地址) 将T的外部UDP地址以及S自己的外部UDP地址(由服务器视角看到)回传给S.
+        6.  此时, S和T都拥有对方的公网UDP地址和端口. 它们 (`P2PConnectionManager` 负责)都尝试从自己的外部地址/端口向对方的外部地址/端口发送UDP包 (UDP打洞).
         7.  如果NAT设备允许这种双向的UDP包通过, P2P UDP连接即建立成功.
-        8.  连接成功后, 客户端可以发送消息 (`msg <text>`) 或尝试切换到TCP (`tcp` 命令).
+        8.  连接成功后, 客户端 (`P2PConnectionManager` 处理实际发送)可以发送消息 (`msg <text>`) 或尝试切换到TCP (`tcp` 命令).
 
 3.  **UDP到TCP切换**:
     *   当一个客户端发起TCP切换请求后, 它会通知对端.
-    *   两个客户端都会关闭当前的P2P UDP连接.
+    *   两个客户端的 `P2PConnectionManager` 都会关闭当前的P2P UDP连接.
     *   它们会尝试使用之前用于UDP P2P的相同IP和端口来建立TCP连接. 通常一个客户端尝试监听 (listen), 另一个尝试拨号 (dial). 如果初始拨号失败, 发起方也会尝试监听.
 
 ## 安装与运行 (Setup and Usage)
