@@ -1,0 +1,20 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "client": {
+    "name": "client1",
+    "connect_timeout": 5000,
+    "heartbeat_interval": 30000
+  },
+  "log": {
+    "level": "info",
+    "file": "p2p.log"
+  },
+  "network": {
+    "udp_buffer_size": 4096,
+    "tcp_buffer_size": 8192,
+    "connection_timeout": 10000
+  }
+}
